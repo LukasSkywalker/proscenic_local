@@ -168,6 +168,18 @@ def test_handle_raw_position_adds_coverage_cell():
         assert (10, 10) in coord._grid  # 500 mm = 0.5 m = 10 cells @ 5 cm
 
 
+def test_battery_comes_from_elec_in_position_status_sample():
+    coord = make_coordinator()
+    # real shape: status samples carry elec but no pos (DP 6 is never sent)
+    raw = protocol.encode_raw(
+        {"infoType": 20001, "data": {"cleanTime": 5, "elec": 81, "mode": "charge"}}
+    )
+    coord._on_status(coord._device, {"dps": {"102": raw}})
+    fn, args = coord.hass.loop.soon[-1]
+    fn(*args)
+    assert coord.state_dps[const.DP_BATTERY] == 81
+
+
 def test_handle_raw_position_draws_line_between_points():
     coord = make_coordinator()
     coord._handle_raw(protocol.encode_raw({"infoType": 20001, "data": {"pos": [100, 0]}}))

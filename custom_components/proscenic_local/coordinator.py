@@ -151,6 +151,11 @@ class ProscenicCoordinator(DataUpdateCoordinator):
         except Exception:
             return
         info_type = msg.get("infoType")
+        elec = msg.get("data", {}).get("elec")
+        if info_type == protocol.INFO_POSITION and elec is not None:
+            # The robot never sends DP 6; battery % rides along in 20001 samples.
+            with self._dps_lock:
+                self._dps_cache[DP_BATTERY] = elec
         with self._lock:
             if info_type == protocol.INFO_PATH:
                 path_id, points = protocol.parse_path_points(msg)

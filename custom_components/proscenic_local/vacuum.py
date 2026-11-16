@@ -10,7 +10,6 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import (
     DOMAIN,
-    DP_BATTERY,
     DP_STATUS,
     DP_SUCTION,
     FAN_GENTLE,
@@ -80,11 +79,6 @@ class ProscenicVacuum(ProscenicEntity, StateVacuumEntity):
         if status in _DOCKED:
             return VacuumActivity.DOCKED
         return VacuumActivity.IDLE
-
-    @property
-    def battery_level(self) -> int | None:
-        value = self.coordinator.state_dps.get(DP_BATTERY)
-        return int(value) if value is not None else None
 
     @property
     def fan_speed(self) -> str | None:

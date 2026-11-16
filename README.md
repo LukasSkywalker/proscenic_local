@@ -12,7 +12,7 @@ Once you have the key, no internet and no vendor app are needed.
 - **Control** — start (whole-home auto), stop, pause, return-to-base, spot clean, and fan speed.
 - **Area cleaning** — define rectangular areas in YAML and clean a named area, fully locally.
 - **Coverage map** — renders where the robot has driven, built from its live path (no cloud floor plan).
-- **Sensors** — covered area (m²) and area count.
+- **Sensors** — battery (%), covered area (m²) and area count.
 
 ## Install
 
@@ -49,6 +49,7 @@ Re-pairing the robot rotates the key — pull it again after any re-pair.
 |---|---|
 | `vacuum.<name>` | control (start / stop / pause / return / spot / fan) |
 | `image.<name>_coverage_map` | the coverage map |
+| `sensor.<name>_battery` | battery level in % |
 | `sensor.<name>_covered_area` | covered area in m² |
 | `sensor.<name>_areas` | number of defined areas |
 | `select.<name>_area` | pick an area |
