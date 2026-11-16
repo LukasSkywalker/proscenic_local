@@ -5,7 +5,6 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry as er
-from homeassistant.helpers.service import async_extract_referenced_entity_ids
 
 from .const import DOMAIN
 from .coordinator import ProscenicCoordinator
@@ -46,7 +45,13 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 def _coordinators(hass: HomeAssistant, call: ServiceCall) -> list[ProscenicCoordinator]:
     """Resolve the coordinators targeted by a service call."""
-    entity_ids = async_extract_referenced_entity_ids(hass, call)
+    target = getattr(call, "target", None) or {}
+    if isinstance(target, dict):
+        entity_ids = list(target.get("entity_id", []) or [])
+    else:
+        entity_ids = []
+    if not entity_ids:
+        entity_ids = list(call.data.get("entity_id", []) or [])
     registry = er.async_get(hass)
     coords: dict[str, ProscenicCoordinator] = {}
     for entity_id in entity_ids:
