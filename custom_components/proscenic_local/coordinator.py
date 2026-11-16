@@ -135,7 +135,14 @@ class ProscenicCoordinator(DataUpdateCoordinator):
                     self._grid, path_id, points, 0.0, 0.0, CELL_RES_M, self._seen
                 )
             elif info_type == protocol.INFO_POSITION:
-                self._position = protocol.parse_position(msg)
+                pos = protocol.parse_position(msg)
+                self._position = pos
+                # This device streams live position (infoType 20001) rather than
+                # a batched path (21011). Mark each position as a covered cell.
+                if len(pos) >= 2:
+                    self._grid.add(
+                        protocol.mm_to_cell(pos[0], pos[1], 0.0, 0.0, CELL_RES_M)
+                    )
 
     # -- coordinator data -------------------------------------------------
 
