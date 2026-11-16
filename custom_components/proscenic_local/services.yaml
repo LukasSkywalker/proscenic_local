@@ -1,0 +1,67 @@
+clean_area:
+  name: Clean area
+  target:
+    entity:
+      domain: [vacuum, select]
+  fields:
+    name:
+      name: Area name
+      description: Leave empty to clean the area selected in the area select entity.
+      required: false
+      selector:
+        text:
+
+add_area:
+  name: Add area
+  target:
+    entity:
+      domain: [vacuum, select]
+  fields:
+    name:
+      name: Area name
+      required: true
+      selector:
+        text:
+    x1:
+      name: X1 (mm)
+      required: true
+      selector:
+        number:
+          mode: box
+    y1:
+      name: Y1 (mm)
+      required: true
+      selector:
+        number:
+          mode: box
+    x2:
+      name: X2 (mm)
+      required: true
+      selector:
+        number:
+          mode: box
+    y2:
+      name: Y2 (mm)
+      required: true
+      selector:
+        number:
+          mode: box
+
+remove_area:
+  name: Remove area
+  target:
+    entity:
+      domain: [vacuum, select]
+  fields:
+    name:
+      name: Area name
+      required: true
+      selector:
+        text:
+
+reload_map:
+  name: Reload map
+  description: Clear the accumulated coverage map.
+  target:
+    entity:
+      domain: [vacuum, select]

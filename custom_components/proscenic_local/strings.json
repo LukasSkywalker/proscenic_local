@@ -1,0 +1,24 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Proscenic Local",
+        "description": "Connect to the robot vacuum over the local network (no cloud).",
+        "data": {
+          "host": "Host / IP address",
+          "device_id": "Device ID",
+          "local_key": "Local key",
+          "protocol_version": "Protocol version",
+          "user_id": "User ID (optional)"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Cannot connect to the device. Check the IP address and that the robot is on the same network.",
+      "invalid_auth": "Invalid local key. The key may have rotated if the robot was re-paired."
+    },
+    "abort": {
+      "already_configured": "This device is already configured."
+    }
+  }
+}
