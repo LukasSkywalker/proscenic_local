@@ -1,9 +1,10 @@
 """Coverage map image entity for Proscenic Local."""
 import collections
+from datetime import datetime, timezone
 
 from homeassistant.components.image import ImageEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
@@ -35,3 +36,10 @@ class ProscenicMapImage(ProscenicEntity, ImageEntity):
     async def async_image(self) -> bytes | None:
         """Return the rendered coverage map (or None before any path)."""
         return await self.hass.async_add_executor_job(self.coordinator.render_map)
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        """Rotate the access token + timestamp so the frontend re-fetches the map."""
+        self.async_update_token()
+        self._attr_image_last_updated = datetime.now(timezone.utc)
+        super()._handle_coordinator_update()
