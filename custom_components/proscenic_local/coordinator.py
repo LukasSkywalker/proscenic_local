@@ -106,11 +106,27 @@ class ProscenicCoordinator(DataUpdateCoordinator):
             self._monitor.stop()
             self._monitor = None
 
+    @staticmethod
+    def _normalize_dps(dps: dict) -> dict:
+        """tinytuya returns string DP keys; convert numeric ones to int.
+
+        E.g. ``{"3": "standby", "102": "..."}`` -> ``{3: "standby", 102: "..."}``
+        so the rest of the code can read with the integer DP constants.
+        """
+        out: dict = {}
+        for key, value in dps.items():
+            try:
+                out[int(key)] = value
+            except (ValueError, TypeError):
+                out[key] = value
+        return out
+
     def _on_status(self, device, result) -> None:
         """Monitor callback (runs on the monitor thread)."""
         dps = result.get("dps") if isinstance(result, dict) else result
         if not isinstance(dps, dict):
             return
+        dps = self._normalize_dps(dps)
         with self._dps_lock:
             self._dps_cache.update(dps)
         raw = dps.get(DP_RAW)
@@ -161,8 +177,8 @@ class ProscenicCoordinator(DataUpdateCoordinator):
             status = await self.hass.async_add_executor_job(_poll)
             if isinstance(status, dict) and "dps" in status:
                 with self._dps_lock:
-                    self._dps_cache.update(status["dps"])
-                return dict(status["dps"])
+                    self._dps_cache.update(self._normalize_dps(status["dps"]))
+                return dict(self._dps_cache)
             return {}
 
         self._monitor.command(self._device, "status")
