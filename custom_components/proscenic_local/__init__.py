@@ -1,6 +1,9 @@
 """Proscenic Local — local control, area cleaning, and coverage map (no cloud)."""
 import logging
+from pathlib import Path
 
+from homeassistant.components.frontend import add_extra_js_url
+from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import HomeAssistantError
@@ -11,15 +14,21 @@ from .coordinator import ProscenicCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
+FRONTEND_DIR = Path(__file__).parent / "frontend"
+
 PLATFORMS = ["vacuum", "image", "sensor", "select", "button"]
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
-    """Register integration-level services."""
+    """Register integration-level services and the frontend module."""
     hass.services.async_register(DOMAIN, "clean_area", _clean_area)
     hass.services.async_register(DOMAIN, "add_area", _add_area)
     hass.services.async_register(DOMAIN, "remove_area", _remove_area)
     hass.services.async_register(DOMAIN, "reload_map", _reload_map)
+    await hass.http.async_register_static_paths(
+        [StaticPathConfig("/proscenic_local/frontend", str(FRONTEND_DIR), cache_headers=False)]
+    )
+    add_extra_js_url(hass, "/proscenic_local/frontend/proscenic-areas-card.js", es5=False)
     return True
 
 

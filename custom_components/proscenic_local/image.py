@@ -7,7 +7,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN
+from .const import DOMAIN, DP_BATTERY, DP_STATUS
 from .coordinator import ProscenicCoordinator
 from .entity import ProscenicEntity
 
@@ -36,6 +36,17 @@ class ProscenicMapImage(ProscenicEntity, ImageEntity):
     async def async_image(self) -> bytes | None:
         """Return the rendered coverage map (or None before any path)."""
         return await self.hass.async_add_executor_job(self.coordinator.render_map)
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        """Expose map bounds, areas, and robot status to the card."""
+        dps = self.coordinator.state_dps
+        return {
+            "map_bounds": self.coordinator.map_bounds,
+            "areas": self.coordinator.areas(),
+            "status": dps.get(DP_STATUS),
+            "battery_level": dps.get(DP_BATTERY),
+        }
 
     @callback
     def _handle_coordinator_update(self) -> None:

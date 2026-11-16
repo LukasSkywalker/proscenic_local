@@ -15,7 +15,7 @@ add_area:
   name: Add area
   target:
     entity:
-      domain: [vacuum, select]
+      domain: [vacuum, select, image]
   fields:
     name:
       name: Area name
@@ -51,7 +51,7 @@ remove_area:
   name: Remove area
   target:
     entity:
-      domain: [vacuum, select]
+      domain: [vacuum, select, image]
   fields:
     name:
       name: Area name

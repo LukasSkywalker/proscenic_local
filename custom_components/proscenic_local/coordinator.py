@@ -9,6 +9,7 @@ from PIL import Image, ImageDraw
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from . import protocol
@@ -223,6 +224,27 @@ class ProscenicCoordinator(DataUpdateCoordinator):
         with self._lock:
             return self._position
 
+    @staticmethod
+    def _bounds_from_points(points) -> dict | None:
+        """Compute the mm bounding box + render transform for a point list."""
+        if len(points) < 2:
+            return None
+        return {
+            "min_x": min(p[0] for p in points),
+            "max_x": max(p[0] for p in points),
+            "min_y": min(p[1] for p in points),
+            "max_y": max(p[1] for p in points),
+            "scale": RENDER_SCALE_PX_PER_MM,
+            "margin": RENDER_MARGIN_PX,
+        }
+
+    @property
+    def map_bounds(self) -> dict | None:
+        """Current mm↔px bounds, derived live from the accumulated path."""
+        with self._lock:
+            points = [p for seg in self._path for p in seg]
+        return self._bounds_from_points(points)
+
     # -- areas ------------------------------------------------------------
 
     def areas(self) -> list[dict]:
@@ -265,7 +287,9 @@ class ProscenicCoordinator(DataUpdateCoordinator):
     async def clean_area(self, name: str) -> None:
         area = self.get_area(name)
         if area is None:
-            raise ValueError(f"no area named {name!r}; known: {[a['name'] for a in self.areas()]}")
+            raise HomeAssistantError(
+                f"no area named {name!r}; known: {[a['name'] for a in self.areas()]}"
+            )
         cmd = protocol.build_clean_area_cmd(
             area, self.map_id, self.user_id, int(time.time() * 1000)
         )
@@ -273,6 +297,10 @@ class ProscenicCoordinator(DataUpdateCoordinator):
 
     async def add_area(self, name: str, x1: int, y1: int, x2: int, y2: int) -> None:
         areas = self.areas()
+        if any(a["name"] == name for a in areas):
+            raise HomeAssistantError(f"area named {name!r} already exists")
+        x1, x2 = sorted((x1, x2))
+        y1, y2 = sorted((y1, y2))
         new_id = max([a["id"] for a in areas], default=100) + 1
         areas.append(
             {
@@ -316,14 +344,15 @@ class ProscenicCoordinator(DataUpdateCoordinator):
             position = self._position
 
         points = [p for seg in path for p in seg]
-        if len(points) < 2:
+        bounds = self._bounds_from_points(points)
+        if bounds is None:
             self._image = None
             return None
 
-        min_x = min(p[0] for p in points)
-        max_x = max(p[0] for p in points)
-        min_y = min(p[1] for p in points)
-        max_y = max(p[1] for p in points)
+        min_x = bounds["min_x"]
+        max_x = bounds["max_x"]
+        min_y = bounds["min_y"]
+        max_y = bounds["max_y"]
 
         scale = RENDER_SCALE_PX_PER_MM
         margin = RENDER_MARGIN_PX
