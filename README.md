@@ -11,7 +11,8 @@ Once you have the key, no internet and no vendor app are needed.
 
 - **Control** — start (whole-home auto), stop, pause, return-to-base, spot clean, and fan speed.
 - **Area cleaning** — define rectangular areas in YAML and clean a named area, fully locally.
-- **Coverage map** — renders where the robot has driven, built from its live path (no cloud floor plan).
+- **Wall map** — renders where the robot has driven and outlines the walls/furniture it stopped at, built
+  from its live path (no cloud floor plan). Survives restarts and HACS updates.
 - **Sensors** — battery (%), covered area (m²) and area count.
 
 ## Install
@@ -54,6 +55,7 @@ Re-pairing the robot rotates the key — pull it again after any re-pair.
 | `sensor.<name>_areas` | number of defined areas |
 | `select.<name>_area` | pick an area |
 | `button.<name>_clean_area` | clean the selected area |
+| `button.<name>_map_walls` | drive along the walls (`wall_follow`) to trace the room outline |
 
 ## Areas (YAML)
 
@@ -81,6 +83,8 @@ Or pick an area in the `select.<name>_area` entity and press `button.<name>_clea
 
 ## Notes / limitations
 
-- The coverage map is "where the robot has driven", not the cloud floor plan (walls). It builds up over runs.
+- Walls are derived from where the robot drove: anything it stopped at (wall, sofa, closed door) is drawn as
+  a wall, and rooms it never entered stay grey. Press *map walls* once per room, normal cleans refine it.
+  If walls look offset, adjust `ROBOT_DIAMETER_MM` in `const.py`. `proscenic_local.reload_map` wipes it.
 - After a full re-map, update the `map_id` option if an area clean silently does nothing.
 - One device per config entry; add the integration again for a second robot.

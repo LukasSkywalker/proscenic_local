@@ -3,6 +3,7 @@ single reactor thread (never a direct call on the shared tinytuya Device), so th
 persistent socket is only ever touched by one thread.
 """
 import asyncio
+import json
 import threading
 
 import pytest
@@ -45,6 +46,7 @@ class FakeEntry:
             "user_id": "",
         }
         self.options = {}
+        self.entry_id = "entry1"
 
 
 class FakeDevice:
@@ -98,6 +100,17 @@ def test_control_standby_uses_switch_go_false():
     coord = make_coordinator()
     asyncio.run(coord.control("standby"))
     assert coord._monitor.calls[0][2] == ({"3": "standby", "2": False},)
+
+
+def test_non_smart_modes_write_mode_only_without_switch_go():
+    # switch_go=True next to wall_follow made the robot flip to smart_clean (live)
+    coord = make_coordinator()
+    asyncio.run(coord.control("wall_follow"))
+    asyncio.run(coord.control("spiral"))
+    assert [c[1:3] for c in coord._monitor.calls] == [
+        ("set_value", (3, "wall_follow")),
+        ("set_value", (3, "spiral")),
+    ]
 
 
 def test_return_to_base_writes_mode_only_without_switch_go():
@@ -288,3 +301,46 @@ def test_add_area_rejects_duplicate_name():
     asyncio.run(coord.add_area("kitchen", 0, 0, 1000, 1000))
     with pytest.raises(HomeAssistantError):
         asyncio.run(coord.add_area("kitchen", 2000, 2000, 3000, 3000))
+
+
+def test_map_survives_restart_via_store():
+    coord = make_coordinator()
+    for x in (100, 300):
+        coord._on_status(coord._device, {"dps": {"102": protocol.encode_raw(
+            {"infoType": 20001, "data": {"pos": [x, 0]}})}})
+    for fn, args in coord.hass.loop.soon:
+        fn(*args)
+    saved = json.loads(json.dumps(coord._store.pending()))  # .storage round-trip
+
+    fresh = make_coordinator()
+    fresh._store.data = saved
+    asyncio.run(fresh.async_load_map())
+    assert fresh._path == [[(100, 0), (300, 0)]]
+    assert fresh._grid == coord._grid
+
+
+def test_battery_only_sample_does_not_schedule_map_save():
+    coord = make_coordinator()
+    coord._on_status(coord._device, {"dps": {"102": protocol.encode_raw(
+        {"infoType": 20001, "data": {"elec": 81}})}})
+    for fn, args in coord.hass.loop.soon:
+        fn(*args)
+    assert coord._store.pending is None
+
+
+def test_render_map_outlines_swept_footprint_as_wall():
+    import io
+
+    from PIL import Image
+
+    from custom_components.proscenic_local import coordinator as c
+
+    coord = make_coordinator()
+    for x in range(0, 1001, 100):
+        coord._handle_raw(protocol.encode_raw({"infoType": 20001, "data": {"pos": [x, 0]}}))
+    img = Image.open(io.BytesIO(coord.render_map()))
+    # walk down from the top edge to the path at x = 500 mm
+    m = const.RENDER_MARGIN_PX
+    col = [img.getpixel((m + 100, y)) for y in range(m + 1)]
+    runs = [col[0]] + [b for a, b in zip(col, col[1:]) if b != a]
+    assert runs == [c.COLOR_UNKNOWN, c.COLOR_WALL, c.COLOR_FLOOR, c.COLOR_PATH]

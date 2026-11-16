@@ -10,6 +10,7 @@ from PIL import Image, ImageDraw
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from . import protocol
@@ -32,16 +33,36 @@ from .const import (
     DP_SUCTION,
     DP_SWITCH_GO,
     DOMAIN,
+    MAP_SAVE_DELAY,
     MAX_LINE_GAP_MM,
     MODE_CHARGEGO,
+    MODE_SMART,
     MODE_STANDBY,
     RENDER_INTERVAL,
     RENDER_LINE_WIDTH,
     RENDER_MARGIN_PX,
     RENDER_SCALE_PX_PER_MM,
+    RENDER_WALL_PX,
+    ROBOT_DIAMETER_MM,
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+COLOR_UNKNOWN = (205, 209, 217)  # never driven
+COLOR_WALL = (60, 64, 75)
+COLOR_FLOOR = (248, 249, 252)    # swept by the robot body
+COLOR_PATH = (66, 110, 200)
+COLOR_ROBOT = (220, 60, 50)
+
+
+def _stroke(draw, pts, width, fill) -> None:
+    """Polyline with a disc on every vertex: round caps/joints, and it plugs the
+    1 px seams PIL leaves between wide segments (they let the wall colour through)."""
+    if len(pts) > 1:
+        draw.line(pts, fill=fill, width=round(width))
+    r = width / 2
+    for x, y in pts:
+        draw.ellipse([x - r, y - r, x + r, y + r], fill=fill)
 
 
 class ProscenicCoordinator(DataUpdateCoordinator):
@@ -69,6 +90,8 @@ class ProscenicCoordinator(DataUpdateCoordinator):
         self._last_render = 0.0
         self._image: bytes | None = None
         self.selected_area: str | None = None
+        # Lives in /config/.storage, so it survives restarts and HACS updates.
+        self._store = Store(hass, 1, f"{DOMAIN}.{entry.entry_id}.map")
 
         super().__init__(
             hass,
@@ -138,18 +161,19 @@ class ProscenicCoordinator(DataUpdateCoordinator):
             self._dps_cache.update(dps)
         raw = dps.get(DP_RAW)
         if isinstance(raw, str) and raw:
-            self._handle_raw(raw)
+            if self._handle_raw(raw):
+                self.hass.loop.call_soon_threadsafe(self._schedule_map_save)
         # Notify HA on its event loop (this callback runs off-loop).
         self.hass.loop.call_soon_threadsafe(
             self.async_set_updated_data, dict(self._dps_cache)
         )
 
-    def _handle_raw(self, raw: str) -> None:
-        """Parse a DP 102 base64 JSON message and update the grid/position."""
+    def _handle_raw(self, raw: str) -> bool:
+        """Parse a DP 102 base64 JSON message; return True if the map changed."""
         try:
             msg = protocol.decode_raw(raw)
         except Exception:
-            return
+            return False
         info_type = msg.get("infoType")
         elec = msg.get("data", {}).get("elec")
         if info_type == protocol.INFO_POSITION and elec is not None:
@@ -167,7 +191,7 @@ class ProscenicCoordinator(DataUpdateCoordinator):
                 # The robot emits a transient (0,0) "no fix" sample; skip it so we
                 # don't draw a star-shaped line out to the map origin and back.
                 if len(pos) >= 2 and pos[0] == 0 and pos[1] == 0:
-                    return
+                    return False
                 if len(pos) >= 2:
                     cell = protocol.mm_to_cell(pos[0], pos[1], 0.0, 0.0, CELL_RES_M)
                     prev = self._position
@@ -189,7 +213,29 @@ class ProscenicCoordinator(DataUpdateCoordinator):
                         self._path[-1].append(pos)
                     else:
                         self._path.append([pos])
+                    self._position = pos
+                    return True
                 self._position = pos
+        return info_type == protocol.INFO_PATH
+
+    # -- persistence ------------------------------------------------------
+
+    async def async_load_map(self) -> None:
+        """Restore the coverage path saved before the last restart."""
+        data = await self._store.async_load()
+        if not data:
+            return
+        with self._lock:
+            self._path = [[tuple(p) for p in seg] for seg in data["path"]]
+            self._grid = {tuple(c) for c in data["grid"]}
+
+    def _map_data(self) -> dict:
+        with self._lock:
+            return {"path": [list(seg) for seg in self._path], "grid": list(self._grid)}
+
+    def _schedule_map_save(self) -> None:
+        """Debounced write (event loop only); HA flushes pending writes on shutdown."""
+        self._store.async_delay_save(self._map_data, MAP_SAVE_DELAY)
 
     # -- coordinator data -------------------------------------------------
 
@@ -271,24 +317,24 @@ class ProscenicCoordinator(DataUpdateCoordinator):
             getattr(self._ensure_device(), method)(*args)
 
     async def control(self, mode: str) -> None:
-        """Write mode + trigger atomically (start/stop/return/spot).
+        """Start a job in `mode`, or stop with `standby`.
 
-        DP 2 (`switch_go`) is the go/stop trigger: True = "go", False = "stop".
-        `standby` is the stop command, so it writes switch_go=False; every other
-        mode starts something and writes switch_go=True.
+        DP 2 (`switch_go`) True means *smart clean*, False means stop in place.
+        Sent next to any other mode it wins within seconds (verified live:
+        chargego and wall_follow both flipped), so only smart/standby write it;
+        every other mode is DP 3 alone, which starts that mode by itself.
         """
-        go = mode != MODE_STANDBY
-        self._command(
-            "set_multiple_values", {str(DP_MODE): mode, str(DP_SWITCH_GO): go}
-        )
+        if mode in (MODE_SMART, MODE_STANDBY):
+            self._command(
+                "set_multiple_values",
+                {str(DP_MODE): mode, str(DP_SWITCH_GO): mode == MODE_SMART},
+            )
+        else:
+            self._command("set_value", DP_MODE, mode)
 
     async def return_to_base(self) -> None:
-        """Dock: DP 3 = chargego *alone* (verified live).
-
-        Adding DP 2 in the same frame overrides it after ~2 s: True starts a
-        smart clean, False stops in place.
-        """
-        self._command("set_value", DP_MODE, MODE_CHARGEGO)
+        """Dock: DP 3 = chargego alone (see control)."""
+        await self.control(MODE_CHARGEGO)
 
     async def pause(self) -> None:
         """Pause the current job (switch_go = False)."""
@@ -345,11 +391,12 @@ class ProscenicCoordinator(DataUpdateCoordinator):
             self._path.clear()
             self._seen.clear()
             self._position = None
+        self._schedule_map_save()
 
     # -- rendering --------------------------------------------------------
 
     def render_map(self) -> bytes | None:
-        """Render the robot's path as a smooth curve (throttled)."""
+        """Render walls, swept floor and the smooth path (throttled)."""
         now = time.time()
         if now - self._last_render < RENDER_INTERVAL:
             return self._image
@@ -379,29 +426,27 @@ class ProscenicCoordinator(DataUpdateCoordinator):
             py = margin + (max_y - y_mm) * scale  # flip Y so +Y is up
             return px, py
 
-        img = Image.new("RGB", (width, height), (235, 238, 245))
+        img = Image.new("RGB", (width, height), COLOR_UNKNOWN)
         draw = ImageDraw.Draw(img)
-        color = (66, 110, 200)
-        line_width = RENDER_LINE_WIDTH
+        segs = [[to_px(x, y) for x, y in seg] for seg in path if seg]
+
+        # Walls = outline of everything the robot body swept over: stroke the
+        # footprint fat in wall colour, then at true width in floor colour; a
+        # RENDER_WALL_PX rim survives only where the robot never got further.
+        foot = ROBOT_DIAMETER_MM * scale
+        for w, fill in ((foot + 2 * RENDER_WALL_PX, COLOR_WALL), (foot, COLOR_FLOOR)):
+            for pts in segs:
+                _stroke(draw, pts, w, fill)
 
         for seg in path:
-            if len(seg) < 2:
-                if seg:
-                    cx, cy = to_px(*seg[0])
-                    draw.ellipse(
-                        [cx - line_width, cy - line_width,
-                         cx + line_width, cy + line_width],
-                        fill=color,
-                    )
-                continue
-            sampled = protocol.smooth_path(seg)
-            px_points = [to_px(x, y) for x, y in sampled]
-            draw.line(px_points, fill=color, width=line_width, joint="curve")
+            if seg:
+                pts = [to_px(x, y) for x, y in protocol.smooth_path(seg)]
+                _stroke(draw, pts, RENDER_LINE_WIDTH, COLOR_PATH)
 
         # mark the current position
         if position is not None and len(position) >= 2:
             mx, my = to_px(position[0], position[1])
-            draw.ellipse([mx - 4, my - 4, mx + 4, my + 4], fill=(220, 60, 50))
+            draw.ellipse([mx - 4, my - 4, mx + 4, my + 4], fill=COLOR_ROBOT)
 
         buf = io.BytesIO()
         img.save(buf, format="PNG")

@@ -1,5 +1,6 @@
 """Smoke tests for integration setup: service + frontend module registration."""
 import asyncio
+import inspect
 
 from homeassistant.components.http import StaticPathConfig
 
@@ -11,7 +12,7 @@ class FakeServices:
         self.registered = []
 
     def async_register(self, domain, name, handler):
-        self.registered.append((domain, name))
+        self.registered.append((domain, name, handler))
 
 
 class FakeHttp:
@@ -34,8 +35,11 @@ def test_async_setup_registers_services_and_static_path():
 
     assert result is True
     # all four integration services are registered
-    names = {name for _, name in hass.services.registered}
+    names = {name for _, name, _ in hass.services.registered}
     assert names == {"clean_area", "add_area", "remove_area", "reload_map"}
+    # HA invokes service handlers with the call only
+    for _, _, handler in hass.services.registered:
+        inspect.signature(handler).bind(object())
     # the card module is served with caching disabled (frontend static path)
     assert len(hass.http.paths) == 1
     cfg = hass.http.paths[0]

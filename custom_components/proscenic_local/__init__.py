@@ -1,5 +1,6 @@
 """Proscenic Local — local control, area cleaning, and coverage map (no cloud)."""
 import logging
+from functools import partial
 from pathlib import Path
 
 from homeassistant.components.frontend import add_extra_js_url
@@ -21,10 +22,10 @@ PLATFORMS = ["vacuum", "image", "sensor", "select", "button"]
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     """Register integration-level services and the frontend module."""
-    hass.services.async_register(DOMAIN, "clean_area", _clean_area)
-    hass.services.async_register(DOMAIN, "add_area", _add_area)
-    hass.services.async_register(DOMAIN, "remove_area", _remove_area)
-    hass.services.async_register(DOMAIN, "reload_map", _reload_map)
+    hass.services.async_register(DOMAIN, "clean_area", partial(_clean_area, hass))
+    hass.services.async_register(DOMAIN, "add_area", partial(_add_area, hass))
+    hass.services.async_register(DOMAIN, "remove_area", partial(_remove_area, hass))
+    hass.services.async_register(DOMAIN, "reload_map", partial(_reload_map, hass))
     await hass.http.async_register_static_paths(
         [StaticPathConfig("/proscenic_local/frontend", str(FRONTEND_DIR), cache_headers=False)]
     )
@@ -36,6 +37,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up one device."""
     coordinator = ProscenicCoordinator(hass, entry)
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
+    await coordinator.async_load_map()
     await coordinator.async_config_entry_first_refresh()
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     await hass.async_add_executor_job(coordinator.start_monitor)

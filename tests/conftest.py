@@ -18,6 +18,7 @@ ha.exceptions = _mkmod("homeassistant.exceptions")
 ha.helpers = _mkmod("homeassistant.helpers")
 ha.helpers.entity_registry = _mkmod("homeassistant.helpers.entity_registry")
 ha.helpers.service = _mkmod("homeassistant.helpers.service")
+ha.helpers.storage = _mkmod("homeassistant.helpers.storage")
 ha.helpers.update_coordinator = _mkmod("homeassistant.helpers.update_coordinator")
 ha.components = _mkmod("homeassistant.components")
 ha.components.frontend = _mkmod("homeassistant.components.frontend")
@@ -55,3 +56,21 @@ class DataUpdateCoordinator:
 
 
 ha.helpers.update_coordinator.DataUpdateCoordinator = DataUpdateCoordinator
+
+
+class Store:
+    """In-memory stand-in for homeassistant.helpers.storage.Store."""
+
+    def __init__(self, hass, version, key):
+        self.key = key
+        self.data = None
+        self.pending = None
+
+    async def async_load(self):
+        return self.data
+
+    def async_delay_save(self, data_func, delay=0):
+        self.pending = data_func
+
+
+ha.helpers.storage.Store = Store
