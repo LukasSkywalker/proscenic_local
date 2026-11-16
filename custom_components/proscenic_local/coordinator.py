@@ -31,6 +31,7 @@ from .const import (
     DP_SUCTION,
     DP_SWITCH_GO,
     DOMAIN,
+    MODE_STANDBY,
     RENDER_INTERVAL,
 )
 
@@ -195,14 +196,20 @@ class ProscenicCoordinator(DataUpdateCoordinator):
             getattr(self._ensure_device(), method)(*args)
 
     async def control(self, mode: str) -> None:
-        """Write mode + trigger atomically (start/stop/return/spot)."""
+        """Write mode + trigger atomically (start/stop/return/spot).
+
+        DP 2 (`switch_go`) is the go/stop trigger: True = "go", False = "stop".
+        `standby` is the stop command, so it writes switch_go=False; every other
+        mode starts something and writes switch_go=True.
+        """
+        go = mode != MODE_STANDBY
         self._command(
-            "set_multiple_values", {str(DP_MODE): mode, str(DP_SWITCH_GO): False}
+            "set_multiple_values", {str(DP_MODE): mode, str(DP_SWITCH_GO): go}
         )
 
     async def pause(self) -> None:
-        """Pause the current job."""
-        self._command("set_value", DP_SWITCH_GO, True)
+        """Pause the current job (switch_go = False)."""
+        self._command("set_value", DP_SWITCH_GO, False)
 
     async def set_fan_speed(self, speed: str) -> None:
         """Set fan speed (DP 14)."""

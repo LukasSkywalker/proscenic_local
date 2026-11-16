@@ -11,7 +11,7 @@ CONF_MAP_ID = "map_id"
 
 # Data points
 DP_POWER = 1
-DP_SWITCH_GO = 2   # command trigger (bool; write with DP_MODE atomically)
+DP_SWITCH_GO = 2   # go/stop trigger (bool: True=go/start/resume, False=stop/pause)
 DP_MODE = 3        # mode (string enum)
 DP_STATUS = 5      # status (string)
 DP_BATTERY = 6     # residual_electricity (percent)
