@@ -50,6 +50,7 @@ FAN_GENTLE = "gentle"
 DEFAULT_SCAN_INTERVAL = 30   # seconds
 RENDER_INTERVAL = 2.0        # seconds between map re-renders
 CELL_RES_M = 0.05            # 5 cm coverage cell
+MAX_LINE_GAP_MM = 2000       # don't draw a path line across jumps > 2 m
 
 # Optional config (set in the config flow). Empty works for local commands.
 CONF_USER_ID = "user_id"

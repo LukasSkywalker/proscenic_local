@@ -80,10 +80,45 @@ def parse_position(response):
 
 
 def mm_to_cell(x_mm, y_mm, x_min_m, y_min_m, res_m):
-    """Convert mm map coordinates to grid cell (col, row), floored."""
-    col = math.floor((x_mm / 1000.0 - x_min_m) / res_m)
-    row = math.floor((y_mm / 1000.0 - y_min_m) / res_m)
+    """Convert mm map coordinates to grid cell (col, row), floored.
+
+    Uses integer arithmetic (cell size in mm) so exact boundaries don't get
+    turned into 5.999… by float rounding (e.g. 300 mm / 0.05 m = 6 cells).
+    """
+    cell_mm = round(res_m * 1000.0)
+    col = (round(x_mm) - round(x_min_m * 1000.0)) // cell_mm
+    row = (round(y_mm) - round(y_min_m * 1000.0)) // cell_mm
     return col, row
+
+
+def distance_mm(pos_a, pos_b):
+    """Euclidean distance (mm) between two (x_mm, y_mm) points."""
+    return math.hypot(pos_a[0] - pos_b[0], pos_a[1] - pos_b[1])
+
+
+def line_cells(cell_a, cell_b):
+    """Return every grid cell on the line between two cells (Bresenham)."""
+    x0, y0 = cell_a
+    x1, y1 = cell_b
+    dx = abs(x1 - x0)
+    dy = abs(y1 - y0)
+    sx = 1 if x0 < x1 else -1
+    sy = 1 if y0 < y1 else -1
+    err = dx - dy
+    cells = []
+    x, y = x0, y0
+    while True:
+        cells.append((x, y))
+        if x == x1 and y == y1:
+            break
+        e2 = 2 * err
+        if e2 > -dy:
+            err -= dy
+            x += sx
+        if e2 < dx:
+            err += dx
+            y += sy
+    return cells
 
 
 def accumulate_path(grid, path_id, points, x_min_m, y_min_m, res_m, seen):

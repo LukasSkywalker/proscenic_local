@@ -31,6 +31,7 @@ from .const import (
     DP_SUCTION,
     DP_SWITCH_GO,
     DOMAIN,
+    MAX_LINE_GAP_MM,
     MODE_STANDBY,
     RENDER_INTERVAL,
 )
@@ -152,13 +153,23 @@ class ProscenicCoordinator(DataUpdateCoordinator):
                 )
             elif info_type == protocol.INFO_POSITION:
                 pos = protocol.parse_position(msg)
-                self._position = pos
-                # This device streams live position (infoType 20001) rather than
-                # a batched path (21011). Mark each position as a covered cell.
                 if len(pos) >= 2:
-                    self._grid.add(
-                        protocol.mm_to_cell(pos[0], pos[1], 0.0, 0.0, CELL_RES_M)
-                    )
+                    cell = protocol.mm_to_cell(pos[0], pos[1], 0.0, 0.0, CELL_RES_M)
+                    prev = self._position
+                    if (
+                        prev is not None
+                        and len(prev) >= 2
+                        and protocol.distance_mm(prev, pos) <= MAX_LINE_GAP_MM
+                    ):
+                        # Connect consecutive positions with a line so the path
+                        # is continuous rather than a sparse set of dots.
+                        prev_cell = protocol.mm_to_cell(
+                            prev[0], prev[1], 0.0, 0.0, CELL_RES_M
+                        )
+                        self._grid.update(protocol.line_cells(prev_cell, cell))
+                    else:
+                        self._grid.add(cell)
+                self._position = pos
 
     # -- coordinator data -------------------------------------------------
 
