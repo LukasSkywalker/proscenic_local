@@ -33,6 +33,7 @@ from .const import (
     DP_SWITCH_GO,
     DOMAIN,
     MAX_LINE_GAP_MM,
+    MODE_CHARGEGO,
     MODE_STANDBY,
     RENDER_INTERVAL,
     RENDER_LINE_WIDTH,
@@ -275,6 +276,14 @@ class ProscenicCoordinator(DataUpdateCoordinator):
         self._command(
             "set_multiple_values", {str(DP_MODE): mode, str(DP_SWITCH_GO): go}
         )
+
+    async def return_to_base(self) -> None:
+        """Dock: DP 3 = chargego *alone* (verified live).
+
+        Adding DP 2 in the same frame overrides it after ~2 s: True starts a
+        smart clean, False stops in place.
+        """
+        self._command("set_value", DP_MODE, MODE_CHARGEGO)
 
     async def pause(self) -> None:
         """Pause the current job (switch_go = False)."""

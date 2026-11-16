@@ -100,6 +100,12 @@ def test_control_standby_uses_switch_go_false():
     assert coord._monitor.calls[0][2] == ({"3": "standby", "2": False},)
 
 
+def test_return_to_base_writes_mode_only_without_switch_go():
+    coord = make_coordinator()
+    asyncio.run(coord.return_to_base())
+    assert [c[1:3] for c in coord._monitor.calls] == [("set_value", (3, "chargego"))]
+
+
 def test_pause_and_fan_speed_also_route_through_monitor():
     coord = make_coordinator()
     asyncio.run(coord.pause())

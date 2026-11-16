@@ -16,7 +16,6 @@ from .const import (
     FAN_GENTLE,
     FAN_NORMAL,
     FAN_STRONG,
-    MODE_CHARGEGO,
     MODE_SMART,
     MODE_SPIRAL,
     MODE_STANDBY,
@@ -105,7 +104,7 @@ class ProscenicVacuum(ProscenicEntity, StateVacuumEntity):
         await self.coordinator.pause()
 
     async def async_return_to_base(self) -> None:
-        await self.coordinator.control(MODE_CHARGEGO)
+        await self.coordinator.return_to_base()
 
     async def async_clean_spot(self) -> None:
         await self.coordinator.control(MODE_SPIRAL)
