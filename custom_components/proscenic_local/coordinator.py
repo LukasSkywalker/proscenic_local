@@ -5,7 +5,7 @@ import threading
 import time
 from datetime import timedelta
 
-from PIL import Image
+from PIL import Image, ImageDraw
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -34,6 +34,9 @@ from .const import (
     MAX_LINE_GAP_MM,
     MODE_STANDBY,
     RENDER_INTERVAL,
+    RENDER_LINE_WIDTH,
+    RENDER_MARGIN_PX,
+    RENDER_SCALE_PX_PER_MM,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -58,6 +61,7 @@ class ProscenicCoordinator(DataUpdateCoordinator):
         self._dps_lock = threading.Lock()
         self._dps_cache: dict = {}
         self._grid: set[tuple[int, int]] = set()
+        self._path: list[list[tuple[float, float]]] = []
         self._seen: set[tuple[int, int]] = set()
         self._position: tuple[int, int] | None = None
         self._last_render = 0.0
@@ -156,19 +160,24 @@ class ProscenicCoordinator(DataUpdateCoordinator):
                 if len(pos) >= 2:
                     cell = protocol.mm_to_cell(pos[0], pos[1], 0.0, 0.0, CELL_RES_M)
                     prev = self._position
-                    if (
+                    continuous = (
                         prev is not None
                         and len(prev) >= 2
                         and protocol.distance_mm(prev, pos) <= MAX_LINE_GAP_MM
-                    ):
-                        # Connect consecutive positions with a line so the path
-                        # is continuous rather than a sparse set of dots.
+                    )
+                    # coverage grid (for the covered_area sensor)
+                    if continuous:
                         prev_cell = protocol.mm_to_cell(
                             prev[0], prev[1], 0.0, 0.0, CELL_RES_M
                         )
                         self._grid.update(protocol.line_cells(prev_cell, cell))
                     else:
                         self._grid.add(cell)
+                    # smooth path (for rendering)
+                    if continuous and self._path:
+                        self._path[-1].append(pos)
+                    else:
+                        self._path.append([pos])
                 self._position = pos
 
     # -- coordinator data -------------------------------------------------
@@ -286,39 +295,66 @@ class ProscenicCoordinator(DataUpdateCoordinator):
     async def reload_map(self) -> None:
         with self._lock:
             self._grid.clear()
+            self._path.clear()
             self._seen.clear()
             self._position = None
 
     # -- rendering --------------------------------------------------------
 
     def render_map(self) -> bytes | None:
-        """Render the coverage grid to a PNG (throttled). Return bytes or None."""
+        """Render the robot's path as a smooth curve (throttled)."""
         now = time.time()
         if now - self._last_render < RENDER_INTERVAL:
             return self._image
         self._last_render = now
         with self._lock:
-            grid = set(self._grid)
+            path = [list(seg) for seg in self._path]
             position = self._position
 
-        if not grid:
+        points = [p for seg in path for p in seg]
+        if len(points) < 2:
             self._image = None
             return None
 
-        cols = [c for c, _ in grid]
-        rows = [r for _, r in grid]
-        min_c, max_c = min(cols), max(cols)
-        min_r, max_r = min(rows), max(rows)
-        width = max_c - min_c + 1
-        height = max_r - min_r + 1
+        min_x = min(p[0] for p in points)
+        max_x = max(p[0] for p in points)
+        min_y = min(p[1] for p in points)
+        max_y = max(p[1] for p in points)
+
+        scale = RENDER_SCALE_PX_PER_MM
+        margin = RENDER_MARGIN_PX
+        width = max(int((max_x - min_x) * scale) + 2 * margin, 1)
+        height = max(int((max_y - min_y) * scale) + 2 * margin, 1)
+
+        def to_px(x_mm: float, y_mm: float) -> tuple[float, float]:
+            px = margin + (x_mm - min_x) * scale
+            py = margin + (max_y - y_mm) * scale  # flip Y so +Y is up
+            return px, py
 
         img = Image.new("RGB", (width, height), (235, 238, 245))
-        px = img.load()
-        for c, r in grid:
-            px[c - min_c, max_r - r] = (66, 110, 200)  # covered, flipped vertically
+        draw = ImageDraw.Draw(img)
+        color = (66, 110, 200)
+        line_width = RENDER_LINE_WIDTH
 
-        scale = 6
-        img = img.resize((width * scale, height * scale), Image.NEAREST)
+        for seg in path:
+            if len(seg) < 2:
+                if seg:
+                    cx, cy = to_px(*seg[0])
+                    draw.ellipse(
+                        [cx - line_width, cy - line_width,
+                         cx + line_width, cy + line_width],
+                        fill=color,
+                    )
+                continue
+            sampled = protocol.smooth_path(seg)
+            px_points = [to_px(x, y) for x, y in sampled]
+            draw.line(px_points, fill=color, width=line_width, joint="curve")
+
+        # mark the current position
+        if position is not None and len(position) >= 2:
+            mx, my = to_px(position[0], position[1])
+            draw.ellipse([mx - 4, my - 4, mx + 4, my + 4], fill=(220, 60, 50))
+
         buf = io.BytesIO()
         img.save(buf, format="PNG")
         self._image = buf.getvalue()

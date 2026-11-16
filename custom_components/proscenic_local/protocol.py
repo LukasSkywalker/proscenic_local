@@ -121,6 +121,42 @@ def line_cells(cell_a, cell_b):
     return cells
 
 
+def smooth_path(points, samples_per_segment=12):
+    """Sample a Catmull-Rom spline through points (a smooth curve).
+
+    Returns a denser list of (x, y) points tracing a smooth curve through the
+    input points. Inputs of one or two points are returned unchanged.
+    """
+    n = len(points)
+    if n < 3:
+        return list(points)
+    result = []
+    for i in range(n - 1):
+        p0 = points[i - 1] if i > 0 else points[i]
+        p1 = points[i]
+        p2 = points[i + 1]
+        p3 = points[i + 2] if i + 2 < n else points[i + 1]
+        for s in range(samples_per_segment):
+            t = s / samples_per_segment
+            t2 = t * t
+            t3 = t2 * t
+            x = 0.5 * (
+                (2 * p1[0])
+                + (-p0[0] + p2[0]) * t
+                + (2 * p0[0] - 5 * p1[0] + 4 * p2[0] - p3[0]) * t2
+                + (-p0[0] + 3 * p1[0] - 3 * p2[0] + p3[0]) * t3
+            )
+            y = 0.5 * (
+                (2 * p1[1])
+                + (-p0[1] + p2[1]) * t
+                + (2 * p0[1] - 5 * p1[1] + 4 * p2[1] - p3[1]) * t2
+                + (-p0[1] + 3 * p1[1] - 3 * p2[1] + p3[1]) * t3
+            )
+            result.append((x, y))
+    result.append(points[-1])
+    return result
+
+
 def accumulate_path(grid, path_id, points, x_min_m, y_min_m, res_m, seen):
     """Mark path points into a coverage grid, deduping by (path_id, index)."""
     for i, (x, y) in enumerate(points):
