@@ -157,6 +157,10 @@ class ProscenicCoordinator(DataUpdateCoordinator):
                 )
             elif info_type == protocol.INFO_POSITION:
                 pos = protocol.parse_position(msg)
+                # The robot emits a transient (0,0) "no fix" sample; skip it so we
+                # don't draw a star-shaped line out to the map origin and back.
+                if len(pos) >= 2 and pos[0] == 0 and pos[1] == 0:
+                    return
                 if len(pos) >= 2:
                     cell = protocol.mm_to_cell(pos[0], pos[1], 0.0, 0.0, CELL_RES_M)
                     prev = self._position
