@@ -53,6 +53,8 @@ class ProscenicCoordinator(DataUpdateCoordinator):
         self._device = None
         self._monitor = None
         self._lock = threading.Lock()
+        self._dps_lock = threading.Lock()
+        self._dps_cache: dict = {}
         self._grid: set[tuple[int, int]] = set()
         self._seen: set[tuple[int, int]] = set()
         self._position: tuple[int, int] | None = None
@@ -81,12 +83,22 @@ class ProscenicCoordinator(DataUpdateCoordinator):
         return self._device
 
     def start_monitor(self) -> None:
-        """Start the tinytuya Monitor on a daemon thread to catch DP 102 pushes."""
+        """Start the tinytuya Monitor on a daemon thread to catch DP pushes.
+
+        The Monitor owns a single persistent socket to the robot. All further
+        status queries and control writes are queued through this Monitor so the
+        socket is only ever touched by the Monitor's reactor thread.
+        """
         import tinytuya
 
-        self._monitor = tinytuya.Monitor(on_status=self._on_status)
-        self._monitor.add(self._ensure_device())
+        device = self._ensure_device()
+        self._monitor = tinytuya.Monitor(
+            on_status=self._on_status, auto_reconnect=True
+        )
+        self._monitor.add(device)
         self._monitor.start()
+        # Prime the state cache: the response arrives as a DP push via _on_status.
+        self._monitor.command(device, "status")
 
     def stop_monitor(self) -> None:
         if self._monitor is not None:
@@ -98,9 +110,15 @@ class ProscenicCoordinator(DataUpdateCoordinator):
         dps = result.get("dps") if isinstance(result, dict) else result
         if not isinstance(dps, dict):
             return
+        with self._dps_lock:
+            self._dps_cache.update(dps)
         raw = dps.get(DP_RAW)
         if isinstance(raw, str) and raw:
             self._handle_raw(raw)
+        # Notify HA on its event loop (this callback runs off-loop).
+        self.hass.loop.call_soon_threadsafe(
+            self.async_set_updated_data, dict(self._dps_cache)
+        )
 
     def _handle_raw(self, raw: str) -> None:
         """Parse a DP 102 base64 JSON message and update the grid/position."""
@@ -121,14 +139,27 @@ class ProscenicCoordinator(DataUpdateCoordinator):
     # -- coordinator data -------------------------------------------------
 
     async def _async_update_data(self) -> dict:
-        """Poll status() and return the raw DPs."""
-        def _poll():
-            return self._ensure_device().status()
+        """Return the latest DPs.
 
-        status = await self.hass.async_add_executor_job(_poll)
-        if not isinstance(status, dict) or "dps" not in status:
+        Before the Monitor owns the socket we do a direct blocking poll (safe:
+        no persistent socket exists yet). Once the Monitor is running, queue a
+        status query through it — the response comes back as a DP push and the
+        cached DPs are returned here.
+        """
+        if self._monitor is None:
+            def _poll():
+                return self._ensure_device().status()
+
+            status = await self.hass.async_add_executor_job(_poll)
+            if isinstance(status, dict) and "dps" in status:
+                with self._dps_lock:
+                    self._dps_cache.update(status["dps"])
+                return dict(status["dps"])
             return {}
-        return status["dps"]
+
+        self._monitor.command(self._device, "status")
+        with self._dps_lock:
+            return dict(self._dps_cache)
 
     @property
     def state_dps(self) -> dict:
@@ -152,29 +183,30 @@ class ProscenicCoordinator(DataUpdateCoordinator):
     def get_area(self, name: str) -> dict | None:
         return next((a for a in self.areas() if a["name"] == name), None)
 
-    def _write(self, payload: dict) -> None:
-        """base64-encode and write a payload to DP 102."""
-        self._ensure_device().set_value(DP_RAW, protocol.encode_raw(payload))
+    def _command(self, method: str, *args) -> None:
+        """Dispatch a device method through the Monitor (single socket, one thread).
+
+        If the Monitor has not started yet, fall back to calling the device
+        directly (safe: no persistent socket exists yet).
+        """
+        if self._monitor is not None:
+            self._monitor.command(self._device, method, *args)
+        else:
+            getattr(self._ensure_device(), method)(*args)
 
     async def control(self, mode: str) -> None:
         """Write mode + trigger atomically (start/stop/return/spot)."""
-        def _write():
-            self._ensure_device().set_multiple_values(
-                {str(DP_MODE): mode, str(DP_SWITCH_GO): False}
-            )
-        await self.hass.async_add_executor_job(_write)
+        self._command(
+            "set_multiple_values", {str(DP_MODE): mode, str(DP_SWITCH_GO): False}
+        )
 
     async def pause(self) -> None:
         """Pause the current job."""
-        def _write():
-            self._ensure_device().set_value(DP_SWITCH_GO, True)
-        await self.hass.async_add_executor_job(_write)
+        self._command("set_value", DP_SWITCH_GO, True)
 
     async def set_fan_speed(self, speed: str) -> None:
         """Set fan speed (DP 14)."""
-        def _write():
-            self._ensure_device().set_value(DP_SUCTION, speed)
-        await self.hass.async_add_executor_job(_write)
+        self._command("set_value", DP_SUCTION, speed)
 
     async def clean_area(self, name: str) -> None:
         area = self.get_area(name)
@@ -183,7 +215,7 @@ class ProscenicCoordinator(DataUpdateCoordinator):
         cmd = protocol.build_clean_area_cmd(
             area, self.map_id, self.user_id, int(time.time() * 1000)
         )
-        await self.hass.async_add_executor_job(self._write, cmd)
+        self._command("set_value", DP_RAW, protocol.encode_raw(cmd))
 
     async def add_area(self, name: str, x1: int, y1: int, x2: int, y2: int) -> None:
         areas = self.areas()
