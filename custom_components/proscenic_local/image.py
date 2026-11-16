@@ -1,4 +1,6 @@
 """Coverage map image entity for Proscenic Local."""
+import collections
+
 from homeassistant.components.image import ImageEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -25,6 +27,10 @@ class ProscenicMapImage(ProscenicEntity, ImageEntity):
 
     def __init__(self, coordinator: ProscenicCoordinator) -> None:
         super().__init__(coordinator, "coverage_map")
+        # ImageEntity.__init__ requires `hass` (set only after the entity is added),
+        # so its `access_tokens` deque is not initialised by the MRO chain. Do it here.
+        self.access_tokens: collections.deque = collections.deque(maxlen=2)
+        self.access_tokens.append("local")
 
     async def async_image(self) -> bytes | None:
         """Return the rendered coverage map (or None before any path)."""
