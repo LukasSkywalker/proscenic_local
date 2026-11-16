@@ -164,6 +164,8 @@ class ProscenicAreasCard extends HTMLElement {
     this._canvas.style.width = "100%";
     this._canvas.style.height = "100%";
     this._canvas.style.cursor = "crosshair";
+    // Without this, touch drags scroll the page and fire pointercancel instead of pointermove/up.
+    this._canvas.style.touchAction = "none";
 
     this._wrapper.appendChild(this._img);
     this._wrapper.appendChild(this._canvas);

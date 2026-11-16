@@ -257,6 +257,14 @@ def test_add_area_normalizes_coordinates():
     assert a["vertexs"] == [[1000, 1000], [2000, 1000], [2000, 2000], [1000, 2000]]
 
 
+def test_add_area_rounds_float_coordinates():
+    coord = make_coordinator()
+    asyncio.run(coord.add_area("hall", -1234.6, 10.4, 99.5, -0.2))
+    v = coord.areas()[0]["vertexs"]
+    assert v == [[-1235, 0], [100, 0], [100, 10], [-1235, 10]]
+    assert all(type(c) is int for p in v for c in p)
+
+
 def test_add_area_rejects_duplicate_name():
     coord = make_coordinator()
     asyncio.run(coord.add_area("kitchen", 0, 0, 1000, 1000))

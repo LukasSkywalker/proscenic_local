@@ -299,8 +299,9 @@ class ProscenicCoordinator(DataUpdateCoordinator):
         areas = self.areas()
         if any(a["name"] == name for a in areas):
             raise HomeAssistantError(f"area named {name!r} already exists")
-        x1, x2 = sorted((x1, x2))
-        y1, y2 = sorted((y1, y2))
+        # The card sends float mm; the robot expects integer vertices.
+        x1, x2 = sorted((round(x1), round(x2)))
+        y1, y2 = sorted((round(y1), round(y2)))
         new_id = max([a["id"] for a in areas], default=100) + 1
         areas.append(
             {
